@@ -1,0 +1,69 @@
+buildscript {
+    repositories {
+        jcenter()
+        mavenCentral()
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+    }
+}
+
+plugins {
+    id 'java'
+    id 'application'
+    id 'idea'
+}
+version = '1.0'
+
+sourceCompatibility = '1.8'
+targetCompatibility = '1.8'
+
+mainClassName = 'tw.com.gamestudio.etl.redash'
+
+compileJava.options.encoding = 'UTF-8'
+compileTestJava.options.encoding = 'UTF-8'
+
+tasks.withType(JavaCompile) {
+    options.encoding = "UTF-8"
+}
+
+repositories {
+    jcenter()
+    mavenCentral()
+}
+
+dependencies {
+    compile fileTree(dir: "libs", include: '*.jar')
+    compile 'com.google.code.gson:gson:2.8.6'
+    compile group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.11.3'
+    compile group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-xml', version: '2.11.3'
+    compile group: 'com.sun.mail', name: 'javax.mail', version: '1.6.2'
+    compile group: 'org.apache.poi', name: 'poi', version: '4.1.2'
+    compile group: 'org.apache.poi', name: 'poi-ooxml', version: '3.9'
+    // https://mvnrepository.com/artifact/com.healthmarketscience.jackcess/jackcess
+    compile group: 'com.healthmarketscience.jackcess', name: 'jackcess', version: '3.5.1'
+    // https://mvnrepository.com/artifact/org.jsoup/jsoup
+    compile group: 'org.jsoup', name: 'jsoup', version: '1.13.1'
+    compile group: 'joinery', name: 'joinery-dataframe', version: '1.9'
+
+    testImplementation 'junit:junit:4.13'
+}
+
+application {
+    mainClassName = "$mainClassName"
+}
+
+test {
+    useJUnit()
+}
+
+jar {
+    baseName = 'etl-db'
+    version = "$version"
+    manifest {
+        attributes 'Main-Class': "$mainClassName"
+    }
+    from {
+        configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+}

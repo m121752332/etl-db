@@ -1,0 +1,235 @@
+package tw.com.gamestudio.etl.agent.extract;
+
+import com.healthmarketscience.jackcess.*;
+import com.healthmarketscience.jackcess.Column;
+import com.healthmarketscience.jackcess.Row;
+import com.healthmarketscience.jackcess.Table;
+import tw.com.gamestudio.etl.agent.api.AgentListener;
+import tw.com.gamestudio.etl.agent.api.ExtractConnector;
+import tw.com.gamestudio.etl.agent.common.*;
+import tw.com.gamestudio.etl.agent.common.Configuration;
+import tw.com.gamestudio.etl.agent.common.Report;
+
+import java.io.File;
+
+/**
+ * @author Game Studio
+ */
+public class AccessExtractConnector implements ExtractConnector {
+
+    private static final String ID = AccessExtractConnector.class.getName();
+
+    private Report report = new Report(ID);
+
+    private String source;
+
+    private String filenamePattern;
+
+    private String tablePattern;
+
+    private boolean recursive = false;
+
+    private AgentListener agentListener;
+
+    @Override
+    public String getId() {
+        return (ID);
+    }
+
+    @Override
+    public void init(Configuration configuration) throws Exception {
+
+        report.start();
+
+        // required
+        source = configuration.get("source", null);
+        if (source == null) {
+            throw new Exception("missing required parameter 'source'");
+        }
+
+        // required
+        filenamePattern = configuration.get("filename_pattern", null);
+        if (filenamePattern == null) {
+            throw new Exception("missing required parameter 'filename_pattern'");
+        }
+
+        // optional
+        tablePattern = configuration.get("table_pattern", null);
+
+        // optional
+        recursive = configuration.get("recursive", false);
+
+    }
+
+    @Override
+    public void extract(AgentListener agentListener) {
+
+        // event listener
+        this.agentListener = agentListener;
+
+        File base = new File(source);
+
+        // check that source exists
+        if (!base.exists()) {
+            report.error(String.format("Source '%s' does not exist", source));
+            return;
+        }
+
+        // check that source is readable
+        if (!base.canRead()) {
+            report.error(String.format("Source '%s' is not readable", source));
+            return;
+        }
+
+        // check that source is directory
+        if (!base.isDirectory()) {
+            report.error(String.format("Source '%s' is not a directory", source));
+            return;
+        }
+        agentListener.onStart();
+
+        if (recursive) {
+            doTravel(base);
+        } else {
+            for (File file : base.listFiles()) {
+                doFile(file);
+            }
+        }
+
+        agentListener.onEnd();
+
+    }
+
+    private void doTravel(File file) {
+        if (file.isDirectory()) {
+            for (File f : file.listFiles()) {
+                doTravel(f);
+            }
+        } else {
+            doFile(file);
+        }
+    }
+
+    private void doFile(File file) {
+        if (!file.getName().matches(filenamePattern)) {
+            return;
+        }
+        if (file.getName().toLowerCase().endsWith(".mdb")) {
+            doAccess(file);
+            return;
+        }
+        if (file.getName().toLowerCase().endsWith(".accdb")) {
+            doAccess(file);
+            return;
+        }
+        report.error(String.format("Unsupported Access file '%s", file.getAbsolutePath()));
+    }
+
+    private void doAccess(File file) {
+        try {
+            Database database = DatabaseBuilder.open(file);
+            for (String tableName : database.getTableNames()) {
+                if (tablePattern != null) {
+                    if (!tableName.matches(tablePattern)) {
+                        continue;
+                    }
+                }
+                tw.com.gamestudio.etl.agent.common.Table t = new tw.com.gamestudio.etl.agent.common.Table();
+                t.setName(tableName);
+                Table table = database.getTable(tableName);
+                for (Column column : table.getColumns()) {
+                    t.getColumns().add(getColumn(column.getName(), column.getType()));
+                }
+                agentListener.onTable(t);
+                report.table();
+                for (Row row : table) {
+                    tw.com.gamestudio.etl.agent.common.Row r = new tw.com.gamestudio.etl.agent.common.Row();
+                    for (Column column : table.getColumns()) {
+                        r.getValues().add(row.get(column.getName()));
+                    }
+                    agentListener.onRow(t, r);
+                    report.row();
+                }
+            }
+        } catch (Exception e) {
+            report.error(e.getMessage());
+        }
+    }
+
+    /**
+     * Map MS Access type to Java type
+     *
+     * https://docs.microsoft.com/en-us/sql/odbc/microsoft/microsoft-access-data-types?view=sql-server-ver15
+     *
+     * @param name
+     * @param type
+     * @return
+     */
+    private tw.com.gamestudio.etl.agent.common.Column getColumn(String name, DataType type) {
+        tw.com.gamestudio.etl.agent.common.Column c = new tw.com.gamestudio.etl.agent.common.Column();
+        c.setName(name);
+        c.setTypeName("Object");
+        c.setClassName("java.lang.Object");
+
+        // string
+        if (type == DataType.TEXT) {
+            c.setTypeName("String");
+            c.setClassName("java.lang.String");
+        }
+
+        // big decimal
+        if (type == DataType.BIG_INT) {
+            c.setTypeName("BigDecimal");
+            c.setClassName("java.math.BigDecimal");
+        }
+
+        // boolean
+        if (type == DataType.BOOLEAN) {
+            c.setTypeName("Boolean");
+            c.setClassName("java.lang.Boolean");
+        }
+
+        // integer
+        if (type == DataType.INT || type == DataType.NUMERIC) {
+            c.setTypeName("Integer");
+            c.setClassName("java.lang.Integer");
+        }
+
+        // long
+        if (type == DataType.LONG) {
+            c.setTypeName("Long");
+            c.setClassName("java.lang.Long");
+        }
+
+        // float
+        if (type == DataType.FLOAT) {
+            c.setTypeName("Float");
+            c.setClassName("java.lang.Float");
+        }
+
+        // double
+        if (type == DataType.DOUBLE) {
+            c.setTypeName("Double");
+            c.setClassName("java.lang.Double");
+        }
+
+        // date
+        if (type == DataType.SHORT_DATE_TIME) {
+            c.setTypeName("Date");
+            c.setClassName("java.util.Date");
+        }
+
+        return (c);
+    }
+
+    @Override
+    public void clean() {
+        report.end();
+    }
+
+    @Override
+    public Report report() {
+        return (report);
+    }
+
+}
